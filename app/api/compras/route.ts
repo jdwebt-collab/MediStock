@@ -127,14 +127,27 @@ export async function DELETE(request: Request) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: 'ID inválido' }, { status: 400 })
 
   const admin = serviceClient()
+
+  // 1. Obtener datos antes de borrar para saber cuánto restar
+  const { data: compra } = await admin.from('compras').select('medicine_id, quantity').eq('id', id).maybeSingle()
+
+  // 2. Eliminar compra
   const { error } = await admin.from('compras').delete().eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // 3. Restar stock del inventario
+  if (compra && compra.medicine_id) {
+    const { data: medicine } = await admin.from('medicines').select('stock').eq('id', compra.medicine_id).maybeSingle()
+    if (medicine) {
+      const newStock = Math.max(0, Number(medicine.stock) - Number(compra.quantity))
+      await admin.from('medicines').update({ stock: newStock }).eq('id', compra.medicine_id)
+    }
+  }
+
   return NextResponse.json({ ok: true })
 }
 
 // PATCH — edit a purchase record (super_admin only)
-// Note: stock is NOT automatically re-adjusted on edit to avoid double-counting.
-// If quantity changed significantly, adjust stock manually via Admin > Inventario.
 export async function PATCH(request: Request) {
   const user = await requireSuperAdmin(request)
   if (!user) return NextResponse.json({ error: 'Solo super_admin puede editar compras' }, { status: 403 })
@@ -158,6 +171,9 @@ export async function PATCH(request: Request) {
   const priceBsf = parseFloat((priceUsd * exchangeRate).toFixed(2))
   const admin = serviceClient()
 
+  // Obtener compra antigua para calcular diferencia (delta) de stock
+  const { data: oldCompra } = await admin.from('compras').select('medicine_id, quantity').eq('id', id).maybeSingle()
+
   const { data, error } = await admin
     .from('compras')
     .update({ medicine_name: medicineName, purchased_at: purchasedAt, quantity, price_usd: priceUsd, exchange_rate: exchangeRate, price_bsf: priceBsf, notes })
@@ -166,5 +182,16 @@ export async function PATCH(request: Request) {
     .single()
 
   if (error || !data) return NextResponse.json({ error: error?.message ?? 'No se pudo actualizar la compra' }, { status: 500 })
+
+  // Auto-ajustar stock si cambió la cantidad
+  if (oldCompra && oldCompra.medicine_id && oldCompra.quantity !== quantity) {
+    const delta = quantity - Number(oldCompra.quantity)
+    const { data: medicine } = await admin.from('medicines').select('stock').eq('id', oldCompra.medicine_id).maybeSingle()
+    if (medicine) {
+      const newStock = Math.max(0, Number(medicine.stock) + delta)
+      await admin.from('medicines').update({ stock: newStock }).eq('id', oldCompra.medicine_id)
+    }
+  }
+
   return NextResponse.json({ ok: true, compra: data })
 }

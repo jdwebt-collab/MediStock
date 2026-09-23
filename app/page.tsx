@@ -418,7 +418,7 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
           <h2 className="font-bold">{editingId ? '✏️ Editando compra' : 'Registrar compra de medicamento'}</h2>
           {editingId && <button onClick={cancelEdit} className="rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100">Cancelar edición</button>}
         </div>
-        <p className="mb-4 text-sm text-slate-600">{editingId ? 'Modifica los campos y guarda. El stock no se ajusta automáticamente al editar.' : 'El stock del medicamento subirá automáticamente al guardar.'}</p>
+        <p className="mb-4 text-sm text-slate-600">{editingId ? 'El inventario se sumará o restará automáticamente según el cambio que hagas en las unidades.' : 'El stock del medicamento subirá automáticamente al guardar.'}</p>
         <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {!editingId && (
             <div className="flex flex-col gap-1">
