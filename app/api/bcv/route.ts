@@ -20,25 +20,26 @@ export async function GET() {
 
     const html = await res.text()
 
-    // BCV website shows the USD rate inside a div#dolar block
-    // Try multiple patterns to be resilient to HTML changes
+    // BCV renders the USD rate like:
+    // <div id="dolar" ...>...<strong class="strong-tb">853,49930000</strong>...
+    // Try most specific pattern first, then fallbacks
     const patterns = [
-      // Pattern 1: strong tag inside #dolar div
-      /<div[^>]+id="dolar"[^>]*>[\s\S]*?<strong>\s*([\d,.]+)\s*<\/strong>/i,
-      // Pattern 2: div with class centered inside #dolar
-      /<div[^>]+id="dolar"[^>]*>[\s\S]{0,500}?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,6}))/i,
-      // Pattern 3: generic "Tipo de Cambio" + number near "USD" or "Dólar"
-      /USD[\s\S]{0,200}?(\d{2,3}[.,]\d{2,6})/i,
-      /Dólar[\s\S]{0,300}?(\d{2,3}[.,]\d{2,6})/i,
+      // Exact match: strong-tb inside #dolar block
+      /<div[^>]+id="dolar"[\s\S]*?<strong[^>]*class="strong-tb"[^>]*>([\d.,]+)<\/strong>/i,
+      // Fallback: any strong-tb on the page
+      /<strong[^>]*class="strong-tb"[^>]*>([\d.,]+)<\/strong>/i,
+      // Fallback: strong tag directly inside #dolar
+      /<div[^>]+id="dolar"[\s\S]{0,600}?<strong[^>]*>([\d.,]+)<\/strong>/i,
     ]
 
     for (const pattern of patterns) {
       const match = html.match(pattern)
       if (match) {
-        const raw = match[1].replace(/\./g, '').replace(',', '.')
+        // BCV uses comma as decimal separator: "853,49930000" → 853.4993
+        const raw = match[1].trim().replace(/\./g, '').replace(',', '.')
         const rate = parseFloat(raw)
-        if (rate > 1 && rate < 1_000_000) {
-          return NextResponse.json({ rate, source: 'bcv.org.ve', fetched_at: new Date().toISOString() })
+        if (rate > 1 && rate < 10_000_000) {
+          return NextResponse.json({ rate: parseFloat(rate.toFixed(4)), source: 'bcv.org.ve', fetched_at: new Date().toISOString() })
         }
       }
     }
