@@ -79,7 +79,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Faltan campos obligatorios o valores inválidos' }, { status: 400 })
   }
 
-  const priceBsf = parseFloat((priceUsd * exchangeRate).toFixed(2))
+  const providedBsf = body.price_bsf !== undefined && body.price_bsf !== null && String(body.price_bsf) !== '' ? Number(body.price_bsf) : null;
+  const priceBsf = providedBsf !== null ? providedBsf : parseFloat((priceUsd * exchangeRate).toFixed(2))
   const admin = serviceClient()
 
   // Insert purchase record
@@ -168,7 +169,8 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'Faltan campos obligatorios o valores inválidos' }, { status: 400 })
   }
 
-  const priceBsf = parseFloat((priceUsd * exchangeRate).toFixed(2))
+  const providedBsf = body.price_bsf !== undefined && body.price_bsf !== null && String(body.price_bsf) !== '' ? Number(body.price_bsf) : null;
+  const priceBsf = providedBsf !== null ? providedBsf : parseFloat((priceUsd * exchangeRate).toFixed(2))
   const admin = serviceClient()
 
   // Obtener compra antigua para calcular diferencia (delta) de stock

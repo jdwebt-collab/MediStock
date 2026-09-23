@@ -366,7 +366,13 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
     try {
       const res = await fetch('/api/bcv')
       const data = await res.json()
-      if (data.rate) setForm(f => ({ ...f, exchange_rate: String(data.rate), price_bsf: f.price_usd ? (parseFloat(f.price_usd) * data.rate).toFixed(2) : f.price_bsf }))
+      if (data.rate) setForm(f => {
+        let newUsd = f.price_usd;
+        let newBsf = f.price_bsf;
+        if (f.price_usd) newBsf = (parseFloat(f.price_usd) * data.rate).toFixed(2);
+        else if (f.price_bsf) newUsd = (parseFloat(f.price_bsf) / data.rate).toFixed(2);
+        return { ...f, exchange_rate: String(data.rate), price_usd: newUsd, price_bsf: newBsf };
+      })
       else alert('No se pudo obtener la tasa BCV automáticamente. Ingrésala manualmente.')
     } catch { alert('Error de red al consultar BCV.') }
     setFetchingRate(false)
@@ -375,6 +381,14 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.medicine_name || !form.purchased_at || !form.quantity || !form.exchange_rate || (!form.price_usd && !form.price_bsf)) return
+    
+    let finalUsd = parseFloat(form.price_usd || '0')
+    let finalBsf = parseFloat(form.price_bsf || '0')
+    const rate = parseFloat(form.exchange_rate)
+    
+    if (!finalUsd && finalBsf && rate) finalUsd = parseFloat((finalBsf / rate).toFixed(2))
+    if (!finalBsf && finalUsd && rate) finalBsf = parseFloat((finalUsd * rate).toFixed(2))
+
     if (editingId) {
       // PATCH — update existing purchase
       const saved = await onAction('PATCH', {
@@ -382,9 +396,9 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
         medicine_name: form.medicine_name,
         purchased_at: form.purchased_at,
         quantity: parseFloat(form.quantity),
-        price_usd: parseFloat(form.price_usd),
-        exchange_rate: parseFloat(form.exchange_rate),
-        price_bsf: parseFloat(form.price_bsf || '0'),
+        price_usd: finalUsd,
+        exchange_rate: rate,
+        price_bsf: finalBsf,
         notes: form.notes || null,
       })
       if (saved) cancelEdit()
@@ -397,9 +411,9 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
         medicine_name: form.medicine_name,
         purchased_at: form.purchased_at,
         quantity: parseFloat(form.quantity),
-        price_usd: parseFloat(form.price_usd),
-        exchange_rate: parseFloat(form.exchange_rate),
-        price_bsf: parseFloat(form.price_bsf || '0'),
+        price_usd: finalUsd,
+        exchange_rate: rate,
+        price_bsf: finalBsf,
         notes: form.notes || null,
         manual_stock: form.manual_stock ? parseFloat(form.manual_stock) : undefined,
       })
