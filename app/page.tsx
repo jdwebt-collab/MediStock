@@ -14,6 +14,13 @@ const treatment = [
   ['Dapagliflozina', '10 mg', 95, true], ['Aspirina', '81 mg', 131, false], ['Hidroclorotiazida', '12,5 mg (½)', 139, false],
 ] as const
 
+function getExhaustionDate(estimatedStock: number, dailyDoses: number) {
+  const daysLeft = estimatedStock / Math.max(Number(dailyDoses), 0.01)
+  const date = new Date()
+  date.setDate(date.getDate() + Math.floor(daysLeft))
+  return date
+}
+
 function getEstimatedStock(medicine: Medicine) {
   if (!medicine.updated_at) return Number(medicine.stock)
   const msPassed = Date.now() - new Date(medicine.updated_at).getTime()
@@ -183,6 +190,17 @@ export default function Page() {
 
   const visible = medicines.filter(m => `${m.name} ${m.brand ?? ''}`.toLowerCase().includes(search.toLowerCase()))
   const alerts = medicines.filter(m => getEstimatedStock(m) / Math.max(Number(m.daily_doses), 0.01) < 90)
+  
+  const needPurchase = medicines
+    .map(m => {
+      const est = getEstimatedStock(m)
+      const days = est / Math.max(Number(m.daily_doses), 0.01)
+      return { ...m, est, days }
+    })
+    .filter(m => m.days < 90)
+    .sort((a, b) => a.days - b.days)
+  
+  const nextPurchaseDate = needPurchase.length > 0 ? getExhaustionDate(needPurchase[0].est, needPurchase[0].daily_doses) : null
   const name = profile?.full_name ?? user.email?.split('@')[0] ?? 'usuario'
 
   return <main className="min-h-screen bg-[#f7f9fc] text-slate-900">
@@ -203,9 +221,24 @@ export default function Page() {
     {activeTab === 'inventory' && (
       <div className="animate-in fade-in duration-300">
         <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3"><Metric icon={<Package />} label="Medicamentos" value={String(medicines.length)} /><Metric icon={<AlertTriangle />} label="Por reabastecer" value={String(alerts.length)} /><Metric icon={isAdmin ? <ShieldCheck /> : <Users />} label={isAdmin ? 'Rol seguro' : 'Acceso familiar'} value={isAdmin ? 'Activo' : 'Protegido'} /></div>
+        {needPurchase.length > 0 && nextPurchaseDate && (
+          <div className="mb-6 rounded-2xl border border-blue-200 bg-blue-50 p-5 shadow-sm">
+            <h2 className="mb-2 font-bold text-blue-900 flex items-center gap-2">
+              <Package className="size-5" /> Sugerencia automática de compra
+            </h2>
+            <p className="text-sm text-blue-800">
+              Según el ritmo de consumo, la próxima compra debe realizarse antes del <strong>{nextPurchaseDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}</strong> para los siguientes medicamentos:
+            </p>
+            <ul className="mt-2 list-inside list-disc text-sm font-semibold text-blue-900">
+              {needPurchase.map(m => (
+                <li key={m.id}>{m.name} {m.brand ? `(${m.brand})` : ''} - Quedan aprox. {Math.floor(m.days)} días</li>
+              ))}
+            </ul>
+          </div>
+        )}
         <Announcements announcements={announcements} patientNames={patientNames} isAdmin={isAdmin} onDelete={announcementAction} />
         <section className="mb-6 flex flex-col gap-4 rounded-2xl border border-teal-100 bg-teal-50 p-5 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex items-center gap-2 text-teal-800"><FileSpreadsheet /><h2 className="font-bold">Respaldo del inventario</h2></div><p className="mt-1 text-sm text-teal-700">Descarga el inventario actual en formato compatible con Excel cuando lo necesites.</p></div><button onClick={exportInventory} className="flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-teal-700"><Download /> Exportar Excel</button></section>
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="flex flex-col gap-4 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-bold">Inventario actual</h2><p className="text-sm text-slate-500">Tratamiento y existencias registradas</p></div><label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm"><Search /><span className="sr-only">Buscar medicamento</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar" className="w-full outline-none" /></label></div><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-4">Medicamento</th><th className="p-4">Dosis</th><th className="p-4">Stock guardado</th><th className="p-4 font-bold text-slate-700">Estimado hoy</th><th className="p-4">Estado</th></tr></thead><tbody>{visible.map(m => { const [label, color] = getStatus(m); const estimated = getEstimatedStock(m); return <tr key={m.id} className="border-t border-slate-100"><td className="p-4 font-semibold">{m.name}</td><td className="p-4">{m.dose}</td><td className="p-4 text-slate-400">{m.stock} {m.unit}</td><td className="p-4 font-bold text-slate-700">{estimated} {m.unit}</td><td className="p-4"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${color}`}>{label}</span></td></tr> })}</tbody></table>{visible.length === 0 && <p className="p-8 text-center text-sm text-slate-500">No hay medicamentos para mostrar.</p>}</div></section>
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="flex flex-col gap-4 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-bold">Inventario actual</h2><p className="text-sm text-slate-500">Tratamiento y existencias registradas</p></div><label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm"><Search /><span className="sr-only">Buscar medicamento</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar" className="w-full outline-none" /></label></div><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-4">Medicamento</th><th className="p-4">Dosis</th><th className="p-4">Stock guardado</th><th className="p-4 font-bold text-slate-700">Estimado hoy</th><th className="p-4">Días restantes</th><th className="p-4 hidden md:table-cell">Proyección (+1 Mes)</th><th className="p-4">Estado</th></tr></thead><tbody>{visible.map(m => { const [label, color] = getStatus(m); const estimated = getEstimatedStock(m); return <tr key={m.id} className="border-t border-slate-100"><td className="p-4 font-semibold">{m.name}</td><td className="p-4">{m.dose}</td><td className="p-4 text-slate-400">{m.stock} {m.unit}</td><td className="p-4 font-bold text-slate-700">{estimated} {m.unit}</td><td className="p-4"><span className="block font-bold">{Math.floor(estimated / Math.max(Number(m.daily_doses), 0.01))} días</span><span className="text-xs text-slate-500">Aprox. {getExhaustionDate(estimated, m.daily_doses).toLocaleDateString('es-ES')}</span></td><td className="p-4 hidden md:table-cell"><span className="block font-semibold">{(estimated + (30 * m.daily_doses)).toFixed(0)} {m.unit}</span><span className="text-xs text-slate-500">Duraría hasta {getExhaustionDate(estimated + (30 * m.daily_doses), m.daily_doses).toLocaleDateString('es-ES')}</span></td><td className="p-4"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${color}`}>{label}</span></td></tr> })}</tbody></table>{visible.length === 0 && <p className="p-8 text-center text-sm text-slate-500">No hay medicamentos para mostrar.</p>}</div></section>
       </div>
     )}
 
