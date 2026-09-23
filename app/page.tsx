@@ -340,13 +340,22 @@ function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; 
 
 function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines: Medicine[]; compras: Compra[]; patientNames: Record<string, string>; onAction: (method: string, payload: any) => Promise<boolean> }) {
   const today = new Date().toISOString().slice(0, 10)
-  const [form, setForm] = useState({ patient_id: '', medicine_id: '', medicine_name: '', purchased_at: today, quantity: '', price_usd: '', exchange_rate: '', notes: '', manual_stock: '' })
+  const emptyForm = { patient_id: '', medicine_id: '', medicine_name: '', purchased_at: today, quantity: '', price_usd: '', exchange_rate: '', notes: '', manual_stock: '' }
+  const [form, setForm] = useState(emptyForm)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [fetchingRate, setFetchingRate] = useState(false)
   const [filterMonth, setFilterMonth] = useState(today.slice(0, 7))
 
   const priceBsf = form.price_usd && form.exchange_rate ? (parseFloat(form.price_usd) * parseFloat(form.exchange_rate)).toFixed(2) : ''
-
   const patients = Object.entries(patientNames).map(([id, name]) => ({ id, name }))
+
+  function startEdit(c: Compra) {
+    setEditingId(c.id)
+    setForm({ patient_id: c.patient_id, medicine_id: c.medicine_id ?? '', medicine_name: c.medicine_name, purchased_at: c.purchased_at, quantity: String(c.quantity), price_usd: String(c.price_usd), exchange_rate: String(c.exchange_rate), notes: c.notes ?? '', manual_stock: '' })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function cancelEdit() { setEditingId(null); setForm(emptyForm) }
 
   function onMedicineChange(medicineId: string) {
     const med = medicines.find(m => m.id === medicineId)
@@ -366,20 +375,37 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.patient_id || !form.medicine_name || !form.purchased_at || !form.quantity || !form.price_usd || !form.exchange_rate) return
-    const saved = await onAction('POST', {
-      patient_id: form.patient_id,
-      medicine_id: form.medicine_id || null,
-      medicine_name: form.medicine_name,
-      purchased_at: form.purchased_at,
-      quantity: parseFloat(form.quantity),
-      price_usd: parseFloat(form.price_usd),
-      exchange_rate: parseFloat(form.exchange_rate),
-      price_bsf: parseFloat(priceBsf || '0'),
-      notes: form.notes || null,
-      manual_stock: form.manual_stock ? parseFloat(form.manual_stock) : undefined,
-    })
-    if (saved) setForm({ patient_id: '', medicine_id: '', medicine_name: '', purchased_at: today, quantity: '', price_usd: '', exchange_rate: form.exchange_rate, notes: '', manual_stock: '' })
+    if (!form.medicine_name || !form.purchased_at || !form.quantity || !form.price_usd || !form.exchange_rate) return
+    if (editingId) {
+      // PATCH — update existing purchase
+      const saved = await onAction('PATCH', {
+        id: editingId,
+        medicine_name: form.medicine_name,
+        purchased_at: form.purchased_at,
+        quantity: parseFloat(form.quantity),
+        price_usd: parseFloat(form.price_usd),
+        exchange_rate: parseFloat(form.exchange_rate),
+        price_bsf: parseFloat(priceBsf || '0'),
+        notes: form.notes || null,
+      })
+      if (saved) cancelEdit()
+    } else {
+      // POST — new purchase
+      if (!form.patient_id) return
+      const saved = await onAction('POST', {
+        patient_id: form.patient_id,
+        medicine_id: form.medicine_id || null,
+        medicine_name: form.medicine_name,
+        purchased_at: form.purchased_at,
+        quantity: parseFloat(form.quantity),
+        price_usd: parseFloat(form.price_usd),
+        exchange_rate: parseFloat(form.exchange_rate),
+        price_bsf: parseFloat(priceBsf || '0'),
+        notes: form.notes || null,
+        manual_stock: form.manual_stock ? parseFloat(form.manual_stock) : undefined,
+      })
+      if (saved) setForm({ ...emptyForm, exchange_rate: form.exchange_rate })
+    }
   }
 
   const filtered = compras.filter(c => c.purchased_at.slice(0, 7) === filterMonth)
@@ -388,26 +414,33 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
 
   return (
     <div className="space-y-6">
-      <section className="rounded-2xl border border-teal-100 bg-teal-50 p-5 shadow-sm">
-        <h2 className="mb-1 font-bold">Registrar compra de medicamento</h2>
-        <p className="mb-4 text-sm text-slate-600">El stock del medicamento subirá automáticamente al guardar.</p>
+      <section className={`rounded-2xl border p-5 shadow-sm ${editingId ? 'border-amber-300 bg-amber-50' : 'border-teal-100 bg-teal-50'}`}>
+        <div className="mb-1 flex items-center justify-between">
+          <h2 className="font-bold">{editingId ? '✏️ Editando compra' : 'Registrar compra de medicamento'}</h2>
+          {editingId && <button onClick={cancelEdit} className="rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100">Cancelar edición</button>}
+        </div>
+        <p className="mb-4 text-sm text-slate-600">{editingId ? 'Modifica los campos y guarda. El stock no se ajusta automáticamente al editar.' : 'El stock del medicamento subirá automáticamente al guardar.'}</p>
         <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {!editingId && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold text-slate-600">Paciente</label>
+              <select required value={form.patient_id} onChange={e => setForm(f => ({ ...f, patient_id: e.target.value }))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                <option value="">Seleccionar paciente</option>
+                {patients.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+          )}
+          {!editingId && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold text-slate-600">Medicamento</label>
+              <select value={form.medicine_id} onChange={e => onMedicineChange(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                <option value="">Seleccionar (o escribe abajo)</option>
+                {medicines.filter(m => !form.patient_id || m.patient_id === form.patient_id).map(m => <option key={m.id} value={m.id}>{m.name} {m.brand ? `(${m.brand})` : ''}</option>)}
+              </select>
+            </div>
+          )}
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-slate-600">Paciente</label>
-            <select required value={form.patient_id} onChange={e => setForm(f => ({ ...f, patient_id: e.target.value }))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-              <option value="">Seleccionar paciente</option>
-              {patients.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-slate-600">Medicamento</label>
-            <select value={form.medicine_id} onChange={e => onMedicineChange(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-              <option value="">Seleccionar (o escribe abajo)</option>
-              {medicines.filter(m => !form.patient_id || m.patient_id === form.patient_id).map(m => <option key={m.id} value={m.id}>{m.name} {m.brand ? `(${m.brand})` : ''}</option>)}
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-slate-600">Nombre (si no está en lista)</label>
+            <label className="text-xs font-semibold text-slate-600">Nombre del medicamento</label>
             <input value={form.medicine_name} onChange={e => setForm(f => ({ ...f, medicine_name: e.target.value }))} placeholder="Ej: Trayenta 5mg" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" required />
           </div>
           <div className="flex flex-col gap-1">
@@ -425,7 +458,7 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-slate-600">Tasa BCV (Bs/USD)</label>
             <div className="flex gap-2">
-              <input type="number" min="1" step="0.0001" required value={form.exchange_rate} onChange={e => setForm(f => ({ ...f, exchange_rate: e.target.value }))} placeholder="Ej: 47.50" className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+              <input type="number" min="1" step="0.0001" required value={form.exchange_rate} onChange={e => setForm(f => ({ ...f, exchange_rate: e.target.value }))} placeholder="Ej: 853.49" className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
               <button type="button" onClick={fetchBcvRate} disabled={fetchingRate} className="shrink-0 rounded-lg bg-slate-800 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">
                 {fetchingRate ? '...' : 'BCV'}
               </button>
@@ -435,15 +468,19 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
             <label className="text-xs font-semibold text-slate-600">Precio en Bs.S (calculado)</label>
             <input readOnly value={priceBsf ? `Bs. ${Number(priceBsf).toLocaleString('es-VE')}` : ''} placeholder="Auto" className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm font-bold text-teal-800" />
           </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-slate-600">Stock manual tras compra (opcional)</label>
-            <input type="number" min="0" step="1" value={form.manual_stock} onChange={e => setForm(f => ({ ...f, manual_stock: e.target.value }))} placeholder="Dejar vacío = auto" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-          </div>
+          {!editingId && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold text-slate-600">Stock manual tras compra (opcional)</label>
+              <input type="number" min="0" step="1" value={form.manual_stock} onChange={e => setForm(f => ({ ...f, manual_stock: e.target.value }))} placeholder="Dejar vacío = auto" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+            </div>
+          )}
           <div className="flex flex-col gap-1 sm:col-span-2 lg:col-span-3">
             <label className="text-xs font-semibold text-slate-600">Notas (opcional)</label>
             <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Farmacia, observaciones..." className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
           </div>
-          <button type="submit" className="rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-teal-700 sm:col-span-2 lg:col-span-3">Registrar compra</button>
+          <button type="submit" className={`rounded-lg px-5 py-2.5 text-sm font-bold text-white sm:col-span-2 lg:col-span-3 ${editingId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-teal-600 hover:bg-teal-700'}`}>
+            {editingId ? 'Guardar cambios' : 'Registrar compra'}
+          </button>
         </form>
       </section>
 
@@ -471,12 +508,12 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
                     <th className="px-4 py-3">Tasa BCV</th>
                     <th className="px-4 py-3">Bs.S</th>
                     <th className="px-4 py-3">Notas</th>
-                    <th className="px-4 py-3"></th>
+                    <th className="px-4 py-3">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {filtered.map(c => (
-                    <tr key={c.id}>
+                    <tr key={c.id} className={editingId === c.id ? 'bg-amber-50' : ''}>
                       <td className="px-4 py-3 font-semibold">{c.medicine_name}</td>
                       <td className="px-4 py-3">{new Date(`${c.purchased_at}T00:00:00`).toLocaleDateString('es-ES')}</td>
                       <td className="px-4 py-3">{c.quantity}</td>
@@ -485,7 +522,10 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
                       <td className="px-4 py-3 font-bold text-teal-800">Bs. {Number(c.price_bsf).toLocaleString('es-VE', { minimumFractionDigits: 2 })}</td>
                       <td className="px-4 py-3 text-slate-500">{c.notes ?? '—'}</td>
                       <td className="px-4 py-3">
-                        <button onClick={() => { if (window.confirm('¿Eliminar esta compra?')) void onAction('DELETE', { id: c.id }) }} className="text-xs font-semibold text-rose-700">Eliminar</button>
+                        <div className="flex gap-3">
+                          <button onClick={() => startEdit(c)} className="text-xs font-semibold text-amber-700 hover:underline">Editar</button>
+                          <button onClick={() => { if (window.confirm('¿Eliminar esta compra?')) void onAction('DELETE', { id: c.id }) }} className="text-xs font-semibold text-rose-700 hover:underline">Eliminar</button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -512,4 +552,3 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
     </div>
   )
 }
-

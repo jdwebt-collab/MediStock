@@ -131,3 +131,40 @@ export async function DELETE(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
 }
+
+// PATCH — edit a purchase record (super_admin only)
+// Note: stock is NOT automatically re-adjusted on edit to avoid double-counting.
+// If quantity changed significantly, adjust stock manually via Admin > Inventario.
+export async function PATCH(request: Request) {
+  const user = await requireSuperAdmin(request)
+  if (!user) return NextResponse.json({ error: 'Solo super_admin puede editar compras' }, { status: 403 })
+
+  let body: Record<string, unknown>
+  try { body = await request.json() } catch { return NextResponse.json({ error: 'Solicitud inválida' }, { status: 400 }) }
+
+  const id            = typeof body.id            === 'string' ? body.id            : ''
+  const medicineName  = typeof body.medicine_name === 'string' ? body.medicine_name.trim() : ''
+  const purchasedAt   = typeof body.purchased_at  === 'string' ? body.purchased_at  : ''
+  const quantity      = Number(body.quantity)
+  const priceUsd      = Number(body.price_usd)
+  const exchangeRate  = Number(body.exchange_rate)
+  const notes         = typeof body.notes         === 'string' ? body.notes.trim() || null : null
+
+  if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: 'ID inválido' }, { status: 400 })
+  if (!medicineName || !purchasedAt || quantity <= 0 || priceUsd < 0 || exchangeRate <= 0) {
+    return NextResponse.json({ error: 'Faltan campos obligatorios o valores inválidos' }, { status: 400 })
+  }
+
+  const priceBsf = parseFloat((priceUsd * exchangeRate).toFixed(2))
+  const admin = serviceClient()
+
+  const { data, error } = await admin
+    .from('compras')
+    .update({ medicine_name: medicineName, purchased_at: purchasedAt, quantity, price_usd: priceUsd, exchange_rate: exchangeRate, price_bsf: priceBsf, notes })
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error || !data) return NextResponse.json({ error: error?.message ?? 'No se pudo actualizar la compra' }, { status: 500 })
+  return NextResponse.json({ ok: true, compra: data })
+}
