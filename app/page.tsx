@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 type Medicine = { id: string; patient_id: string; name: string; brand: string | null; dose: string; stock: number; daily_doses: number; unit: string; essential: boolean; updated_at?: string }
 type Profile = { full_name: string; role: string }
 type Announcement = { id: string; patient_id: string; title: string; body: string; purchase_date: string | null; estimated_amount: number | null; created_at: string }
+type Compra = { id: string; patient_id: string; medicine_id: string | null; medicine_name: string; purchased_at: string; quantity: number; price_usd: number; exchange_rate: number; price_bsf: number; notes: string | null; created_at: string }
 
 const treatment = [
   ['Trayenta', '5 mg', 87, true], ['Metoprolol', '50 mg (½)', 225, true], ['Amlodipino', '5 mg', 131, true],
@@ -41,7 +42,8 @@ export default function Page() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [medicines, setMedicines] = useState<Medicine[]>([])
   const [search, setSearch] = useState('')
-  const [activeTab, setActiveTab] = useState<'inventory' | 'admin' | 'settings'>('inventory')
+  const [activeTab, setActiveTab] = useState<'inventory' | 'admin' | 'compras' | 'settings'>('inventory')
+  const [compras, setCompras] = useState<Compra[]>([])
   const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [fullName, setFullName] = useState('')
   const [newPassword, setNewPassword] = useState(''); const [newEmail, setNewEmail] = useState('')
   const [adminUsers, setAdminUsers] = useState<any[]>([])
@@ -82,11 +84,33 @@ export default function Page() {
     if (response.ok) setAnnouncements((await response.json()).announcements ?? [])
   }
 
+  async function loadCompras() {
+    const { data } = await supabase?.auth.getSession() ?? { data: { session: null } }
+    if (!data.session?.access_token) return
+    const response = await fetch('/api/compras', { headers: { Authorization: `Bearer ${data.session.access_token}` } })
+    if (response.ok) setCompras((await response.json()).compras ?? [])
+  }
+
+  async function compraAction(method: string, payload: any) {
+    const { data } = await supabase?.auth.getSession() ?? { data: { session: null } }
+    const response = await fetch('/api/compras', { method, headers: { 'Content-Type': 'application/json', ...(data.session?.access_token ? { Authorization: `Bearer ${data.session.access_token}` } : {}) }, body: JSON.stringify(payload) })
+    const result = await response.json()
+    if (response.ok) {
+      setMessage(method === 'POST' ? 'Compra registrada. Stock actualizado.' : 'Compra eliminada.')
+      await loadCompras()
+      await loadData(user?.id ?? '')
+    } else {
+      setMessage(result.error ?? 'No se pudo completar la operación.')
+    }
+    return response.ok
+  }
+
   async function announcementAction(method: string, payload: any) {
     const { data } = await supabase?.auth.getSession() ?? { data: { session: null } }
     const response = await fetch('/api/announcements', { method, headers: { 'Content-Type': 'application/json', ...(data.session?.access_token ? { Authorization: `Bearer ${data.session.access_token}` } : {}) }, body: JSON.stringify(payload) })
     const result = await response.json()
-    if (response.ok) { setMessage(method === 'POST' ? 'Información publicada para los usuarios autorizados.' : 'Información eliminada.'); await loadAnnouncements() }
+    if (response.ok) { setMessage(method === 'POST' ? 'Información publicada para los usuarios autorizados.' : 'Información eliminada.'); await loadAnnouncements()
+    await loadCompras() }
     else setMessage(result.error ?? 'No se pudo guardar la información.')
     return response.ok
   }
@@ -164,21 +188,29 @@ export default function Page() {
   async function changeEmail(event: FormEvent) { event.preventDefault(); if (!supabase || !newEmail || newEmail === user?.email) return setMessage('Escribe un correo nuevo diferente al actual.'); const { error } = await supabase.auth.updateUser({ email: newEmail }); setMessage(error ? 'No se pudo cambiar el correo.' : 'Solicitud enviada. Revisa el correo actual y el nuevo para confirmar el cambio.'); if (!error) setNewEmail('') }
   async function signOut() { await supabase?.auth.signOut() }
   function exportInventory() {
-    const headers = ['Medicamento', 'Marca', 'Dosis', 'Dosis diarias', 'Unidad', 'Stock guardado', 'Estimado hoy', 'Días restantes', 'Estado']
-    const rows = medicines.map((medicine) => {
+    const invHeaders = ['Medicamento', 'Marca', 'Dosis', 'Dosis diarias', 'Unidad', 'Stock guardado', 'Estimado hoy', 'Días restantes', 'Estado']
+    const invRows = medicines.map((medicine) => {
       const estimated = getEstimatedStock(medicine)
       const days = estimated / Math.max(Number(medicine.daily_doses), 0.01)
       const status = days < 60 ? 'Crítico' : days < 90 ? 'Reabastecer' : 'En stock'
       return [medicine.name, medicine.brand ?? '', medicine.dose, medicine.daily_doses, medicine.unit, medicine.stock, estimated, Math.floor(days), status]
     })
-    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows])
-    worksheet['!cols'] = headers.map((header, index) => ({ wch: Math.max(header.length + 2, ...rows.map((row) => String(row[index] ?? '').length + 2), 12) }))
-    worksheet['!autofilter'] = { ref: `A1:I${rows.length + 1}` }
-    worksheet['!freeze'] = { xSplit: 0, ySplit: 1 }
+    const comprasHeaders = ['Medicamento', 'Fecha', 'Unidades', 'Precio USD', 'Tasa BCV', 'Precio Bs.S', 'Notas', 'Registrado']
+    const comprasRows = compras.map(c => [c.medicine_name, c.purchased_at, c.quantity, c.price_usd, c.exchange_rate, c.price_bsf, c.notes ?? '', new Date(c.created_at).toLocaleDateString('es-ES')])
     const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventario')
-    XLSX.writeFile(workbook, `medistock-inventario-${new Date().toISOString().slice(0, 10)}.xlsx`)
-    setMessage('Respaldo Excel exportado con formato de tabla y filtros.')
+    const wsInv = XLSX.utils.aoa_to_sheet([invHeaders, ...invRows])
+    wsInv['!cols'] = invHeaders.map((h, i) => ({ wch: Math.max(h.length + 2, ...invRows.map(r => String(r[i] ?? '').length + 2), 12) }))
+    wsInv['!autofilter'] = { ref: `A1:I${invRows.length + 1}` }
+    wsInv['!freeze'] = { xSplit: 0, ySplit: 1 }
+    XLSX.utils.book_append_sheet(workbook, wsInv, 'Inventario')
+    if (compras.length > 0) {
+      const wsCompras = XLSX.utils.aoa_to_sheet([comprasHeaders, ...comprasRows])
+      wsCompras['!cols'] = comprasHeaders.map((h, i) => ({ wch: Math.max(h.length + 2, ...comprasRows.map(r => String(r[i] ?? '').length + 2), 12) }))
+      wsCompras['!freeze'] = { xSplit: 0, ySplit: 1 }
+      XLSX.utils.book_append_sheet(workbook, wsCompras, 'Compras')
+    }
+    XLSX.writeFile(workbook, `medistock-backup-${new Date().toISOString().slice(0, 10)}.xlsx`)
+    setMessage('Backup completo exportado: Inventario + Compras en Excel.')
   }
 
   const isAdmin = profile?.role === 'super_admin'
@@ -215,6 +247,7 @@ export default function Page() {
     <div className="mb-6 flex gap-4 border-b border-slate-200">
       <button onClick={() => setActiveTab('inventory')} className={`pb-3 px-1 text-sm font-bold border-b-2 transition-colors ${activeTab === 'inventory' ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>Inventario</button>
       {isAdmin && <button onClick={() => setActiveTab('admin')} className={`pb-3 px-1 text-sm font-bold border-b-2 transition-colors ${activeTab === 'admin' ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>Administración</button>}
+      {isAdmin && <button onClick={() => setActiveTab('compras')} className={`pb-3 px-1 text-sm font-bold border-b-2 transition-colors ${activeTab === 'compras' ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>Compras</button>}
       <button onClick={() => setActiveTab('settings')} className={`pb-3 px-1 text-sm font-bold border-b-2 transition-colors ${activeTab === 'settings' ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>Configuración</button>
     </div>
 
@@ -247,6 +280,12 @@ export default function Page() {
         <AdminUsers users={adminUsers} onAction={adminUserAction} />
         <AdminAnnouncements users={adminUsers} announcements={announcements} onAction={announcementAction} />
         <AdminInventory medicines={medicines} patientNames={patientNames} onUpdate={medicineAction} />
+      </div>
+    )}
+
+    {activeTab === 'compras' && isAdmin && (
+      <div className="animate-in fade-in duration-300">
+        <ComprasTab medicines={medicines} compras={compras} patientNames={patientNames} onAction={compraAction} />
       </div>
     )}
 
@@ -298,3 +337,179 @@ function AdminUsers({ users, onAction }: { users: any[]; onAction: (method: stri
 function AuthScreen(props: any) { return <main className="flex min-h-screen items-center justify-center bg-[#f7f9fc] px-5"><div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 shadow-sm"><div className="mb-7 text-center"><div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-2xl bg-teal-600 text-white"><Pill /></div><h1 className="text-2xl font-bold">{props.isSignUp ? 'Crear cuenta de acceso' : 'Ingresar a MediStock'}</h1><p className="mt-2 text-sm text-slate-500">{props.isSignUp ? 'Pacientes, familiares y administradores pueden registrarse.' : 'Inventario y cuidado familiar seguro'}</p></div><form onSubmit={props.handleAuth} className="flex flex-col gap-4">{props.isSignUp && <label className="text-sm font-semibold">Nombre completo<input required value={props.fullName} onChange={(e: any) => props.setFullName(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 font-normal outline-none focus:border-teal-500" /></label>}<label className="text-sm font-semibold">Correo electrónico<input required type="email" value={props.email} onChange={(e: any) => props.setEmail(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 font-normal outline-none focus:border-teal-500" /></label><label className="text-sm font-semibold">Clave<input required minLength={8} maxLength={128} type="password" value={props.password} onChange={(e: any) => props.setPassword(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 font-normal outline-none focus:border-teal-500" /></label>{props.message && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{props.message}</p>}<button disabled={props.loading} className="rounded-lg bg-teal-600 py-3 text-sm font-bold text-white hover:bg-teal-700 disabled:opacity-60">{props.loading ? 'Procesando…' : props.isSignUp ? 'Crear cuenta' : 'Ingresar'}</button></form><button onClick={() => props.setIsSignUp(!props.isSignUp)} className="mt-5 w-full text-sm font-semibold text-teal-700">{props.isSignUp ? 'Ya tengo cuenta' : 'Crear cuenta paciente'}</button></div></main> }
 function AccountCard({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) { return <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="mb-4 flex items-center gap-3"><div className="text-teal-600">{icon}</div><h2 className="font-bold">{title}</h2></div>{children}</section> }
 function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) { return <div className="rounded-xl border border-slate-200 bg-white p-4"><div className="mb-3 text-teal-600">{icon}</div><p className="text-xs text-slate-500">{label}</p><p className="mt-1 text-xl font-bold">{value}</p></div> }
+
+function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines: Medicine[]; compras: Compra[]; patientNames: Record<string, string>; onAction: (method: string, payload: any) => Promise<boolean> }) {
+  const today = new Date().toISOString().slice(0, 10)
+  const [form, setForm] = useState({ patient_id: '', medicine_id: '', medicine_name: '', purchased_at: today, quantity: '', price_usd: '', exchange_rate: '', notes: '', manual_stock: '' })
+  const [fetchingRate, setFetchingRate] = useState(false)
+  const [filterMonth, setFilterMonth] = useState(today.slice(0, 7))
+
+  const priceBsf = form.price_usd && form.exchange_rate ? (parseFloat(form.price_usd) * parseFloat(form.exchange_rate)).toFixed(2) : ''
+
+  const patients = Object.entries(patientNames).map(([id, name]) => ({ id, name }))
+
+  function onMedicineChange(medicineId: string) {
+    const med = medicines.find(m => m.id === medicineId)
+    setForm(f => ({ ...f, medicine_id: medicineId, medicine_name: med?.name ?? '', patient_id: med?.patient_id ?? f.patient_id }))
+  }
+
+  async function fetchBcvRate() {
+    setFetchingRate(true)
+    try {
+      const res = await fetch('/api/bcv')
+      const data = await res.json()
+      if (data.rate) setForm(f => ({ ...f, exchange_rate: String(data.rate) }))
+      else alert('No se pudo obtener la tasa BCV automáticamente. Ingrésala manualmente.')
+    } catch { alert('Error de red al consultar BCV.') }
+    setFetchingRate(false)
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!form.patient_id || !form.medicine_name || !form.purchased_at || !form.quantity || !form.price_usd || !form.exchange_rate) return
+    const saved = await onAction('POST', {
+      patient_id: form.patient_id,
+      medicine_id: form.medicine_id || null,
+      medicine_name: form.medicine_name,
+      purchased_at: form.purchased_at,
+      quantity: parseFloat(form.quantity),
+      price_usd: parseFloat(form.price_usd),
+      exchange_rate: parseFloat(form.exchange_rate),
+      price_bsf: parseFloat(priceBsf || '0'),
+      notes: form.notes || null,
+      manual_stock: form.manual_stock ? parseFloat(form.manual_stock) : undefined,
+    })
+    if (saved) setForm({ patient_id: '', medicine_id: '', medicine_name: '', purchased_at: today, quantity: '', price_usd: '', exchange_rate: form.exchange_rate, notes: '', manual_stock: '' })
+  }
+
+  const filtered = compras.filter(c => c.purchased_at.slice(0, 7) === filterMonth)
+  const totalUsd = filtered.reduce((sum, c) => sum + Number(c.price_usd), 0)
+  const totalBsf = filtered.reduce((sum, c) => sum + Number(c.price_bsf), 0)
+
+  return (
+    <div className="space-y-6">
+      <section className="rounded-2xl border border-teal-100 bg-teal-50 p-5 shadow-sm">
+        <h2 className="mb-1 font-bold">Registrar compra de medicamento</h2>
+        <p className="mb-4 text-sm text-slate-600">El stock del medicamento subirá automáticamente al guardar.</p>
+        <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold text-slate-600">Paciente</label>
+            <select required value={form.patient_id} onChange={e => setForm(f => ({ ...f, patient_id: e.target.value }))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+              <option value="">Seleccionar paciente</option>
+              {patients.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold text-slate-600">Medicamento</label>
+            <select value={form.medicine_id} onChange={e => onMedicineChange(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+              <option value="">Seleccionar (o escribe abajo)</option>
+              {medicines.filter(m => !form.patient_id || m.patient_id === form.patient_id).map(m => <option key={m.id} value={m.id}>{m.name} {m.brand ? `(${m.brand})` : ''}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold text-slate-600">Nombre (si no está en lista)</label>
+            <input value={form.medicine_name} onChange={e => setForm(f => ({ ...f, medicine_name: e.target.value }))} placeholder="Ej: Trayenta 5mg" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" required />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold text-slate-600">Fecha de compra</label>
+            <input type="date" required value={form.purchased_at} onChange={e => setForm(f => ({ ...f, purchased_at: e.target.value }))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold text-slate-600">Unidades en la caja</label>
+            <input type="number" min="1" step="1" required value={form.quantity} onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} placeholder="Ej: 30" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold text-slate-600">Precio USD (caja completa)</label>
+            <input type="number" min="0" step="0.01" required value={form.price_usd} onChange={e => setForm(f => ({ ...f, price_usd: e.target.value }))} placeholder="Ej: 12.50" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold text-slate-600">Tasa BCV (Bs/USD)</label>
+            <div className="flex gap-2">
+              <input type="number" min="1" step="0.0001" required value={form.exchange_rate} onChange={e => setForm(f => ({ ...f, exchange_rate: e.target.value }))} placeholder="Ej: 47.50" className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+              <button type="button" onClick={fetchBcvRate} disabled={fetchingRate} className="shrink-0 rounded-lg bg-slate-800 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">
+                {fetchingRate ? '...' : 'BCV'}
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold text-slate-600">Precio en Bs.S (calculado)</label>
+            <input readOnly value={priceBsf ? `Bs. ${Number(priceBsf).toLocaleString('es-VE')}` : ''} placeholder="Auto" className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm font-bold text-teal-800" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold text-slate-600">Stock manual tras compra (opcional)</label>
+            <input type="number" min="0" step="1" value={form.manual_stock} onChange={e => setForm(f => ({ ...f, manual_stock: e.target.value }))} placeholder="Dejar vacío = auto" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+          </div>
+          <div className="flex flex-col gap-1 sm:col-span-2 lg:col-span-3">
+            <label className="text-xs font-semibold text-slate-600">Notas (opcional)</label>
+            <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Farmacia, observaciones..." className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+          </div>
+          <button type="submit" className="rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-teal-700 sm:col-span-2 lg:col-span-3">Registrar compra</button>
+        </form>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="font-bold">Historial de compras</h2>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-semibold text-slate-500">Mes:</label>
+            <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
+          </div>
+        </div>
+
+        {filtered.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">No hay compras registradas para este mes.</p>
+        ) : (
+          <>
+            <div className="overflow-x-auto rounded-xl border">
+              <table className="w-full min-w-[700px] text-left text-sm">
+                <thead className="bg-slate-50 text-xs text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Medicamento</th>
+                    <th className="px-4 py-3">Fecha</th>
+                    <th className="px-4 py-3">Unidades</th>
+                    <th className="px-4 py-3">USD</th>
+                    <th className="px-4 py-3">Tasa BCV</th>
+                    <th className="px-4 py-3">Bs.S</th>
+                    <th className="px-4 py-3">Notas</th>
+                    <th className="px-4 py-3"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {filtered.map(c => (
+                    <tr key={c.id}>
+                      <td className="px-4 py-3 font-semibold">{c.medicine_name}</td>
+                      <td className="px-4 py-3">{new Date(`${c.purchased_at}T00:00:00`).toLocaleDateString('es-ES')}</td>
+                      <td className="px-4 py-3">{c.quantity}</td>
+                      <td className="px-4 py-3">${Number(c.price_usd).toFixed(2)}</td>
+                      <td className="px-4 py-3">{Number(c.exchange_rate).toFixed(4)}</td>
+                      <td className="px-4 py-3 font-bold text-teal-800">Bs. {Number(c.price_bsf).toLocaleString('es-VE', { minimumFractionDigits: 2 })}</td>
+                      <td className="px-4 py-3 text-slate-500">{c.notes ?? '—'}</td>
+                      <td className="px-4 py-3">
+                        <button onClick={() => { if (window.confirm('¿Eliminar esta compra?')) void onAction('DELETE', { id: c.id }) }} className="text-xs font-semibold text-rose-700">Eliminar</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                <p className="text-xs text-slate-500">Total USD · {filterMonth}</p>
+                <p className="mt-1 text-lg font-bold">${totalUsd.toFixed(2)}</p>
+              </div>
+              <div className="rounded-xl border border-teal-100 bg-teal-50 p-4">
+                <p className="text-xs text-slate-500">Total Bs.S · {filterMonth}</p>
+                <p className="mt-1 text-lg font-bold text-teal-800">Bs. {totalBsf.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</p>
+              </div>
+              <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                <p className="text-xs text-slate-500">Compras registradas</p>
+                <p className="mt-1 text-lg font-bold">{filtered.length}</p>
+              </div>
+            </div>
+          </>
+        )}
+      </section>
+    </div>
+  )
+}
+
