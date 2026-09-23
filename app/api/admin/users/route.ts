@@ -37,7 +37,7 @@ export async function GET(request: Request) {
     if (relationshipError) return NextResponse.json({ error: `No se pudieron cargar las relaciones: ${relationshipError.message}` }, { status: 500 })
     const patientIds = [identity.user.id, ...(relationships ?? []).map((relationship) => relationship.patient_id)]
     const [{ data: medicines, error }, { data: patients, error: patientsError }, { data: announcements, error: announcementsError }] = await Promise.all([
-      admin.from('medicines').select('id, patient_id, name, brand, dose, stock, daily_doses, unit, essential').in('patient_id', patientIds).order('name'),
+      admin.from('medicines').select('id, patient_id, name, brand, dose, stock, daily_doses, unit, essential, updated_at').in('patient_id', patientIds).order('name'),
       admin.from('profiles').select('id, full_name, role').in('id', patientIds),
       admin.from('patient_announcements').select('id, patient_id, title, body, purchase_date, estimated_amount, created_at').in('patient_id', patientIds).order('created_at', { ascending: false }),
     ])
@@ -52,7 +52,7 @@ export async function GET(request: Request) {
   }))
   const { data: medicines, error: medicinesError } = await admin
     .from('medicines')
-    .select('id, patient_id, name, brand, dose, stock, daily_doses, unit, essential')
+    .select('id, patient_id, name, brand, dose, stock, daily_doses, unit, essential, updated_at')
     .order('name')
   if (medicinesError) return NextResponse.json({ error: 'No se pudo cargar el inventario administrativo' }, { status: 500 })
   return NextResponse.json({ profile: identity.profile, users, medicines: medicines ?? [] })
@@ -83,7 +83,7 @@ export async function PATCH(request: Request) {
     const dailyDoses = Number(body.dailyDoses)
     if (!Number.isFinite(stock) || stock < 0 || !Number.isFinite(dailyDoses) || dailyDoses <= 0) return NextResponse.json({ error: 'Stock y dosis diarias deben ser válidos' }, { status: 400 })
     const admin = serviceClient()
-    const { data, error } = await admin.from('medicines').update({ stock: Math.floor(stock), daily_doses: dailyDoses }).eq('id', body.medicineId).select('id, patient_id, name, brand, dose, stock, daily_doses, unit, essential').single()
+    const { data, error } = await admin.from('medicines').update({ stock: Math.floor(stock), daily_doses: dailyDoses }).eq('id', body.medicineId).select('id, patient_id, name, brand, dose, stock, daily_doses, unit, essential, updated_at').single()
     if (error || !data) return NextResponse.json({ error: error?.message ?? 'No se pudo actualizar el medicamento' }, { status: 500 })
     return NextResponse.json({ ok: true, medicine: data })
   }

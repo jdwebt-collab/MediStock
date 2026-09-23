@@ -1,0 +1,42 @@
+superadmin
+helvysdealbarran@gmail.com
+11643183
+
+haismet@paciente.com
+123456789
+
+hayvisl@paciente.com
+123456789
+
+haismara@paciente.com
+123456789
+
+josefina@paciente.com
+123456789
+
+cuenta madre jdwebt@gmail.com
+
+https://medistockweb.netlify.app/
+
+MediStock es una aplicación de gestión y seguimiento de medicamentos con Supabase.
+
+Permite iniciar sesión como paciente, familiar/cuidador o superadmin.
+Gestiona medicamentos, dosis, unidades, existencias y días restantes.
+Muestra estados de inventario: en stock, por reabastecer y crítico.
+Envía alertas visuales cuando una medicina requiere atención, con campanita animada.
+Permite al superadmin administrar usuarios e inventario global.
+Protege el rol de superadmin, evitando que se degrade o elimine accidentalmente.
+Permite publicar información general por paciente, como próximas compras, observaciones y montos estimados.
+Los familiares autorizados pueden consultar el inventario y avisos del paciente asociado.
+Exporta el inventario a un archivo Excel .xlsx con columnas, filtros, anchos automáticos y encabezado congelado.
+Permite actualizar datos de perfil, correo y contraseña mediante Supabase Auth.
+Usa permisos y políticas RLS para limitar el acceso a la información según el usuario y sus relaciones autorizadas.
+
+
+NEXT_PUBLIC_SUPABASE_URL
+https://efrowmtaolsncjyqouws.supabase.co
+
+NEXT_PUBLIC_SUPABASE_ANON_KEY eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVmcm93bXRhb2xzbmNqeXFvdXdzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAwMjk5MjIsImV4cCI6MjEwNTYwNTkyMn0.Gyam6YlF_4dmMIsytStwSaYevyQuKEKetO1bil8BIYY
+
+service role:
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVmcm93bXRhb2xzbmNqeXFvdXdzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MDAyOTkyMiwiZXhwIjoyMTA1NjA1OTIyfQ.yYvIhI1zYTaB0ICQMrBSQ6qVz0Qw2XtPYcS6f5oBKx8
