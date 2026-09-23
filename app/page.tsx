@@ -340,18 +340,17 @@ function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; 
 
 function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines: Medicine[]; compras: Compra[]; patientNames: Record<string, string>; onAction: (method: string, payload: any) => Promise<boolean> }) {
   const today = new Date().toISOString().slice(0, 10)
-  const emptyForm = { patient_id: '', medicine_id: '', medicine_name: '', purchased_at: today, quantity: '', price_usd: '', exchange_rate: '', notes: '', manual_stock: '' }
+  const emptyForm = { patient_id: '', medicine_id: '', medicine_name: '', purchased_at: today, quantity: '', price_usd: '', exchange_rate: '', price_bsf: '', notes: '', manual_stock: '' }
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [fetchingRate, setFetchingRate] = useState(false)
   const [filterMonth, setFilterMonth] = useState(today.slice(0, 7))
 
-  const priceBsf = form.price_usd && form.exchange_rate ? (parseFloat(form.price_usd) * parseFloat(form.exchange_rate)).toFixed(2) : ''
   const patients = Object.entries(patientNames).map(([id, name]) => ({ id, name }))
 
   function startEdit(c: Compra) {
     setEditingId(c.id)
-    setForm({ patient_id: c.patient_id, medicine_id: c.medicine_id ?? '', medicine_name: c.medicine_name, purchased_at: c.purchased_at, quantity: String(c.quantity), price_usd: String(c.price_usd), exchange_rate: String(c.exchange_rate), notes: c.notes ?? '', manual_stock: '' })
+    setForm({ patient_id: c.patient_id, medicine_id: c.medicine_id ?? '', medicine_name: c.medicine_name, purchased_at: c.purchased_at, quantity: String(c.quantity), price_usd: String(c.price_usd), exchange_rate: String(c.exchange_rate), price_bsf: String(c.price_bsf), notes: c.notes ?? '', manual_stock: '' })
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -367,7 +366,7 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
     try {
       const res = await fetch('/api/bcv')
       const data = await res.json()
-      if (data.rate) setForm(f => ({ ...f, exchange_rate: String(data.rate) }))
+      if (data.rate) setForm(f => ({ ...f, exchange_rate: String(data.rate), price_bsf: f.price_usd ? (parseFloat(f.price_usd) * data.rate).toFixed(2) : f.price_bsf }))
       else alert('No se pudo obtener la tasa BCV automáticamente. Ingrésala manualmente.')
     } catch { alert('Error de red al consultar BCV.') }
     setFetchingRate(false)
@@ -375,7 +374,7 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.medicine_name || !form.purchased_at || !form.quantity || !form.price_usd || !form.exchange_rate) return
+    if (!form.medicine_name || !form.purchased_at || !form.quantity || !form.exchange_rate || (!form.price_usd && !form.price_bsf)) return
     if (editingId) {
       // PATCH — update existing purchase
       const saved = await onAction('PATCH', {
@@ -385,7 +384,7 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
         quantity: parseFloat(form.quantity),
         price_usd: parseFloat(form.price_usd),
         exchange_rate: parseFloat(form.exchange_rate),
-        price_bsf: parseFloat(priceBsf || '0'),
+        price_bsf: parseFloat(form.price_bsf || '0'),
         notes: form.notes || null,
       })
       if (saved) cancelEdit()
@@ -400,7 +399,7 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
         quantity: parseFloat(form.quantity),
         price_usd: parseFloat(form.price_usd),
         exchange_rate: parseFloat(form.exchange_rate),
-        price_bsf: parseFloat(priceBsf || '0'),
+        price_bsf: parseFloat(form.price_bsf || '0'),
         notes: form.notes || null,
         manual_stock: form.manual_stock ? parseFloat(form.manual_stock) : undefined,
       })
@@ -453,20 +452,20 @@ function ComprasTab({ medicines, compras, patientNames, onAction }: { medicines:
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-slate-600">Precio USD (caja completa)</label>
-            <input type="number" min="0" step="0.01" required value={form.price_usd} onChange={e => setForm(f => ({ ...f, price_usd: e.target.value }))} placeholder="Ej: 12.50" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+            <input type="number" min="0" step="0.01" value={form.price_usd} onChange={e => { const val = e.target.value; setForm(f => ({ ...f, price_usd: val, price_bsf: val && f.exchange_rate ? (parseFloat(val) * parseFloat(f.exchange_rate)).toFixed(2) : f.price_bsf })) }} placeholder="Ej: 12.50" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-slate-600">Tasa BCV (Bs/USD)</label>
             <div className="flex gap-2">
-              <input type="number" min="1" step="0.0001" required value={form.exchange_rate} onChange={e => setForm(f => ({ ...f, exchange_rate: e.target.value }))} placeholder="Ej: 853.49" className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+              <input type="number" min="1" step="0.0001" required value={form.exchange_rate} onChange={e => { const val = e.target.value; setForm(f => ({ ...f, exchange_rate: val, price_bsf: f.price_usd && val ? (parseFloat(f.price_usd) * parseFloat(val)).toFixed(2) : f.price_bsf })) }} placeholder="Ej: 853.49" className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
               <button type="button" onClick={fetchBcvRate} disabled={fetchingRate} className="shrink-0 rounded-lg bg-slate-800 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">
                 {fetchingRate ? '...' : 'BCV'}
               </button>
             </div>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-slate-600">Precio en Bs.S (calculado)</label>
-            <input readOnly value={priceBsf ? `Bs. ${Number(priceBsf).toLocaleString('es-VE')}` : ''} placeholder="Auto" className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm font-bold text-teal-800" />
+            <label className="text-xs font-semibold text-slate-600">Precio Bs.S (caja completa)</label>
+            <input type="number" min="0" step="0.01" value={form.price_bsf} onChange={e => { const val = e.target.value; setForm(f => ({ ...f, price_bsf: val, price_usd: val && f.exchange_rate ? (parseFloat(val) / parseFloat(f.exchange_rate)).toFixed(2) : f.price_usd })) }} placeholder="Ej: 500" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-teal-800" />
           </div>
           {!editingId && (
             <div className="flex flex-col gap-1">
