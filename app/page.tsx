@@ -109,8 +109,7 @@ export default function Page() {
     const { data } = await supabase?.auth.getSession() ?? { data: { session: null } }
     const response = await fetch('/api/announcements', { method, headers: { 'Content-Type': 'application/json', ...(data.session?.access_token ? { Authorization: `Bearer ${data.session.access_token}` } : {}) }, body: JSON.stringify(payload) })
     const result = await response.json()
-    if (response.ok) { setMessage(method === 'POST' ? 'Información publicada para los usuarios autorizados.' : 'Información eliminada.'); await loadAnnouncements()
-    await loadCompras() }
+    if (response.ok) { setMessage(method === 'POST' ? 'Información publicada para los usuarios autorizados.' : 'Información eliminada.'); await loadAnnouncements() }
     else setMessage(result.error ?? 'No se pudo guardar la información.')
     return response.ok
   }
@@ -149,6 +148,7 @@ export default function Page() {
     await loadAnnouncements()
     const isAdmin = profileData?.role === 'super_admin'
     if (isAdmin) {
+      await loadCompras()
       setAdminUsers(result.users ?? [])
       setPatientNames(Object.fromEntries((result.users ?? []).map((item: any) => [item.id, item.full_name ?? item.email ?? 'Usuario'])))
       setMedicines((result.medicines ?? []) as Medicine[])
