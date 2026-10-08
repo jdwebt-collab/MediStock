@@ -66,11 +66,15 @@ export async function POST(request: Request) {
   const password = typeof body.password === 'string' ? body.password : ''
   const fullName = typeof body.fullName === 'string' ? body.fullName.trim() : ''
   const role = ['patient', 'family', 'caregiver'].includes(String(body.role)) ? String(body.role) : 'family'
+  const patientId = typeof body.patientId === 'string' && /^[0-9a-f-]{36}$/i.test(body.patientId) ? body.patientId : null
   if (!validEmail(email) || !validName(fullName) || password.length < 8 || password.length > 128) return NextResponse.json({ error: 'Nombre, correo válido y una clave de 8 a 128 caracteres son obligatorios' }, { status: 400 })
   const admin = serviceClient()
   const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { full_name: fullName, role } })
   if (error || !data.user) return NextResponse.json({ error: error?.message ?? 'No se pudo crear el usuario' }, { status: 400 })
   await admin.from('profiles').upsert({ id: data.user.id, full_name: fullName, role })
+  if (patientId && role !== 'patient') {
+    await admin.from('care_relationships').upsert({ patient_id: patientId, caregiver_id: data.user.id, relationship: role, can_edit_inventory: role === 'caregiver' }, { onConflict: 'patient_id,caregiver_id', ignoreDuplicates: false })
+  }
   return NextResponse.json({ ok: true })
 }
 
@@ -109,6 +113,10 @@ export async function PATCH(request: Request) {
   if (error || !updatedProfile) return NextResponse.json({ error: error?.message ?? 'Supabase no devolvió el perfil actualizado' }, { status: 500 })
   const { data: updatedAuth } = await admin.auth.admin.getUserById(id)
   if (!updatedAuth.user) return NextResponse.json({ error: 'El perfil cambió, pero no se pudo verificar Auth' }, { status: 500 })
+  const patientId = typeof body.patientId === 'string' && /^[0-9a-f-]{36}$/i.test(body.patientId) ? body.patientId : null
+  if (patientId && savedRole !== 'patient' && savedRole !== 'super_admin') {
+    await admin.from('care_relationships').upsert({ patient_id: patientId, caregiver_id: id, relationship: savedRole, can_edit_inventory: savedRole === 'caregiver' }, { onConflict: 'patient_id,caregiver_id', ignoreDuplicates: false })
+  }
   return NextResponse.json({ ok: true, verified: { profile: updatedProfile, email: updatedAuth.user.email, name: updatedAuth.user.user_metadata?.full_name ?? '' }, user: { ...updatedProfile, email: updatedAuth.user.email } })
 }
 
